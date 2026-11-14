@@ -33,6 +33,7 @@
     .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
     /* У сітці блок опису фіксованої висоти — щоб картки були однакові, а не
        вирівнювались по найдовшому тексту. Довший опис скролиться всередині. */
+    .card h2{min-height:calc(2 * 1.55em)}
     .card .desc{min-height:calc(4 * 1.55em)}
   }
   @media (min-width:1100px){
@@ -54,6 +55,10 @@
   .card .desc::-webkit-scrollbar{width:6px}
   .card .desc::-webkit-scrollbar-track{background:transparent}
   .card .desc::-webkit-scrollbar-thumb{background:#3a424f;border-radius:3px}
+  .card .desc p{margin:0 0 6px}
+  .card .desc p:last-child{margin:0}
+  .card .desc a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(245,166,35,.35)}
+  .card .desc a:hover{border-bottom-color:var(--accent)}
   .meta{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-bottom:12px}
   .meta b{color:#c8cdd6;font-weight:600}
   .url{
@@ -61,7 +66,9 @@
     padding:9px 11px;font:12.5px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
     color:#b9c1cd;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
-  .row{display:flex;gap:9px;margin-top:auto;padding-top:12px;flex-wrap:wrap}
+  .row{display:flex;gap:8px;margin-top:auto;padding-top:12px;flex-wrap:wrap}
+  /* У картці кнопки трохи щільніші, щоб дві вміщались в один рядок */
+  .card .row button,.card .row a.btn{padding:9px 12px}
   button,a.btn{
     font:inherit;font-size:14px;font-weight:600;cursor:pointer;
     border-radius:9px;padding:9px 15px;border:1px solid transparent;
@@ -113,9 +120,48 @@
     return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  function baseUrl(){
+    return location.href.replace(/[^/]*$/, '');
+  }
+
   function pluginUrl(p){
-    const base = location.href.replace(/[^/]*$/, '');
-    return base + encodeURIComponent(p.slug) + '.js';
+    return baseUrl() + encodeURIComponent(p.slug) + '.js';
+  }
+
+  function readmeUrl(p){
+    return baseUrl() + 'plugins/' + encodeURIComponent(p.slug) + '/';
+  }
+
+  // Опис — кілька абзаців (розділені порожнім рядком). У кожному підтримуються
+  // посилання: [текст](https://…) або голий URL. Вузли будуємо вручну (без innerHTML),
+  // щоб у розмітку не потрапив чужий HTML.
+  const LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<)]+)/g;
+
+  function textWithLinks(target, text){
+    let last = 0, m;
+    LINK_RE.lastIndex = 0;
+    while ((m = LINK_RE.exec(text)) !== null){
+      if (m.index > last) target.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const a = document.createElement('a');
+      a.href = m[2] || m[3];
+      a.textContent = m[1] || m[3];
+      a.target = '_blank';
+      a.rel = 'noopener';
+      target.appendChild(a);
+      last = LINK_RE.lastIndex;
+    }
+    if (last < text.length) target.appendChild(document.createTextNode(text.slice(last)));
+  }
+
+  function descNode(text){
+    const box = document.createElement('div');
+    box.className = 'desc';
+    text.split(/\n{2,}/).forEach(function(chunk){
+      const p = document.createElement('p');
+      textWithLinks(p, chunk.trim());
+      box.appendChild(p);
+    });
+    return box;
   }
 
   function card(p){
@@ -127,14 +173,17 @@
 
     el.innerHTML =
       '<h2>' + esc(p.name || p.slug) + '</h2>' +
-      (p.description ? '<p class="desc">' + esc(p.description) + '</p>' : '') +
       (bits.length ? '<div class="meta">' + bits.join('') + '</div>' : '') +
       '<div class="url" data-url title="' + esc(pluginUrl(p)) + '">' + esc(pluginUrl(p)) + '</div>' +
       '<div class="row">' +
         '<button class="primary" data-copy>Скопіювати посилання</button>' +
+        '<a class="btn ghost" data-readme>README</a>' +
       '</div>';
 
+    if (p.description) el.querySelector('h2').after(descNode(p.description));
+
     const url = pluginUrl(p);
+    el.querySelector('[data-readme]').href = readmeUrl(p);
     const btn = el.querySelector('[data-copy]');
     btn.addEventListener('click', async function(){
       try {

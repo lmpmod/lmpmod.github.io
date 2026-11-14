@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Залежності збірки
+        run: python3 -m pip install --quiet markdown
       - name: Збірка сайту
         run: python3 tools/build.py
       - name: README.md має бути закомічений

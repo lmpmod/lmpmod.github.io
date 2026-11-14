@@ -18,7 +18,9 @@
 """
 import argparse
 import datetime as dt
+import html
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -30,7 +32,12 @@ SITE = ROOT / "_site"
 
 
 def parse_readme(path: Path) -> dict:
-    """H1 → назва, перший абзац після нього → опис, YAML-подібний front matter → решта полів."""
+    """H1 → назва; перший розділ (до наступного заголовка) → опис; front matter → решта полів.
+
+    Опис — це все, що стоїть між H1 і першим заголовком `##`. Абзаци зберігаються
+    (розділяються порожнім рядком), рядки всередині абзацу склеюються пробілом,
+    пункти списку стають окремими рядками з «•». Саме цей текст бачить картка.
+    """
     meta: dict = {"name": None, "description": "", "hidden": False}
     if not path.is_file():
         return meta
@@ -50,27 +57,39 @@ def parse_readme(path: Path) -> dict:
                 meta["hidden"] = val.lower() in ("true", "yes", "1")
             elif key == "name":
                 meta["name"] = val
+            elif key == "description":
+                meta["description"] = val
     body = lines[body_start:]
 
-    for line in body:
+    for index, line in enumerate(body):
         if line.startswith("# "):
             meta["name"] = line[2:].strip()
-            body = body[body.index(line) + 1:]
+            body = body[index + 1:]
             break
 
-    para = []
+    paragraphs: list[str] = []
+    buffer: list[str] = []
     for line in body:
         stripped = line.strip()
-        if not stripped:
-            if para:
-                break
+        if stripped.startswith("#"):          # почався наступний розділ
+            break
+        if not stripped:                      # порожній рядок закриває абзац
+            if buffer:
+                paragraphs.append(" ".join(buffer))
+                buffer = []
             continue
-        if stripped.startswith(("#", "-", "`", ">", "|")):
-            if para:
-                break
+        if stripped.startswith(("- ", "* ")):  # пункт списку — окремим рядком
+            if buffer:
+                paragraphs.append(" ".join(buffer))
+                buffer = []
+            paragraphs.append("• " + stripped[2:].strip())
             continue
-        para.append(stripped)
-    meta["description"] = " ".join(para)
+        buffer.append(stripped)
+    if buffer:
+        paragraphs.append(" ".join(buffer))
+
+    if paragraphs:
+        meta["description"] = "\n\n".join(paragraphs)
     return meta
 
 
@@ -88,6 +107,73 @@ def last_updated(folder: Path) -> str:
     if newest is None:
         return dt.date.today().isoformat()
     return dt.date.fromtimestamp(newest).isoformat()
+
+
+README_PAGE = """<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__NAME__ — lmpmod</title>
+<style>
+  :root{--bg:#0d0f12;--panel:#15181d;--panel-2:#1b1f26;--line:#262b34;--text:#e8eaed;
+        --muted:#8b93a1;--accent:#f5a623}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:radial-gradient(1200px 600px at 50% -200px,#1a1f27 0%,var(--bg) 60%);
+       color:var(--text);min-height:100vh;
+       font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto;padding:48px 20px 80px}
+  .back{display:inline-block;margin-bottom:22px;color:var(--muted);text-decoration:none;font-size:14px}
+  .back:hover{color:var(--accent)}
+  article h1{font-size:26px;margin:0 0 18px;letter-spacing:-.01em}
+  article h2{font-size:19px;margin:34px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  article h3{font-size:16px;margin:24px 0 8px}
+  article p{color:#cfd4dc}
+  article a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(245,166,35,.35)}
+  article a:hover{border-bottom-color:var(--accent)}
+  article code{background:#0a0c0f;border:1px solid var(--line);border-radius:5px;
+       padding:1px 5px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  article pre{background:#0a0c0f;border:1px solid var(--line);border-radius:10px;
+       padding:14px;overflow:auto}
+  article pre code{background:none;border:0;padding:0;font-size:13px}
+  article table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px;
+       display:block;overflow-x:auto}
+  article th,article td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  article th{background:var(--panel-2);color:#c8cdd6}
+  article ul,article ol{padding-left:22px;color:#cfd4dc}
+  article li{margin:6px 0}
+  article blockquote{margin:16px 0;padding:8px 16px;border-left:3px solid var(--accent);
+       color:var(--muted);background:var(--panel)}
+  article img{max-width:100%}
+</style>
+</head>
+<body><div class="wrap">
+<a class="back" href="/">&larr; до списку плагінів</a>
+<article>
+__BODY__
+</article>
+</div></body>
+</html>
+"""
+
+
+def readme_page(slug: str, name: str) -> str | None:
+    """README.md плагіна → HTML-сторінка в стилі сайту (front matter не рендеримо)."""
+    source = PLUGINS / slug / "README.md"
+    if not source.is_file():
+        return None
+    try:
+        import markdown
+    except ImportError:  # у CI ставимо залежність окремим кроком
+        raise SystemExit(
+            "потрібна бібліотека markdown: python3 -m pip install markdown"
+        )
+    text = source.read_text(encoding="utf-8")
+    text = re.sub(r"\A---\r?\n.*?\r?\n---\r?\n", "", text, count=1, flags=re.S)
+    body = markdown.markdown(text, extensions=["tables", "fenced_code", "sane_lists"])
+    return README_PAGE.replace("__NAME__", html.escape(name, quote=False)).replace("__BODY__", body)
 
 
 def collect() -> tuple[list, list]:
@@ -126,6 +212,9 @@ def build_site(plugins: list) -> None:
         slug = entry["slug"]
         shutil.copytree(PLUGINS / slug, SITE / "plugins" / slug)
         shutil.copy2(PLUGINS / slug / f"{slug}.js", SITE / f"{slug}.js")
+        page = readme_page(slug, entry["name"])
+        if page:
+            (SITE / "plugins" / slug / "index.html").write_text(page, encoding="utf-8")
     manifest = {
         "version": 1,
         "updated": dt.date.today().isoformat(),
@@ -148,8 +237,9 @@ def write_readme(plugins: list) -> None:
         if p.get("updated"):
             bits.append(p["updated"])
         tail = f" · {' · '.join(bits)}" if bits else ""
+        short = (p["description"].split("\n\n")[0] if p["description"] else "") or "без опису"
         lines.append(
-            f"- **{p['name']}** — {p['description'] or 'без опису'}"
+            f"- **{p['name']}** — {short}"
             f"{tail} · [{p['slug']}.js](https://lmpmod.github.io/{p['slug']}.js)"
         )
     (ROOT / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
