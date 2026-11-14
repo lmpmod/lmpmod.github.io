@@ -93,6 +93,24 @@ def parse_readme(path: Path) -> dict:
     return meta
 
 
+def first_added(folder: Path) -> str:
+    """Дата, коли тека плагіна вперше потрапила в репозиторій (для порядку додавання)."""
+    try:
+        out = subprocess.run(
+            ["git", "log", "--diff-filter=A", "--reverse", "--format=%cI", "--",
+             str(folder.relative_to(ROOT))],
+            cwd=ROOT, capture_output=True, text=True, check=True,
+        ).stdout.strip().splitlines()
+        if out:
+            return out[0]
+    except Exception:
+        pass
+    oldest = min((f.stat().st_mtime for f in folder.rglob("*") if f.is_file()), default=None)
+    if oldest is None:
+        return dt.datetime.now().isoformat(timespec="seconds")
+    return dt.datetime.fromtimestamp(oldest).isoformat(timespec="seconds")
+
+
 def last_updated(folder: Path) -> str:
     try:
         out = subprocess.run(
@@ -192,6 +210,7 @@ def collect() -> tuple[list, list]:
             "name": info["name"] or slug,
             "description": info["description"],
             "updated": last_updated(folder),
+            "added": first_added(folder),
         }
         if info.get("version"):
             entry["version"] = info["version"]
@@ -200,6 +219,8 @@ def collect() -> tuple[list, list]:
         if info.get("hidden"):
             entry["hidden"] = True
         plugins.append(entry)
+    # порядок за замовчуванням — як плагіни додавались; для однакової дати — за назвою
+    plugins.sort(key=lambda e: (e["added"], e["name"].lower()))
     return plugins, problems
 
 

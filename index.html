@@ -79,6 +79,15 @@
   button.ghost,a.ghost{background:transparent;border-color:var(--line);color:var(--text)}
   button.ghost:hover,a.ghost:hover{border-color:#3a424f;background:#1f242c}
   button.copied{background:var(--ok)!important;color:#04160a}
+  .sortbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-16px 0 22px}
+  .sortbar[hidden]{display:none}
+  .sortbar__label{color:#5f6775;font-size:12.5px;margin-right:2px}
+  .chip{
+    font:inherit;font-size:13px;padding:6px 12px;border-radius:99px;cursor:pointer;
+    background:transparent;border:1px solid var(--line);color:var(--muted);transition:.15s ease;
+  }
+  .chip:hover{border-color:#3a424f;color:var(--text)}
+  .chip[aria-pressed="true"]{background:var(--accent-soft);border-color:rgba(245,166,35,.45);color:var(--accent)}
   .empty{
     border:1px dashed var(--line);border-radius:14px;padding:40px 20px;text-align:center;color:var(--muted);
   }
@@ -98,6 +107,13 @@
     <h1>lmp<span>mod</span></h1>
   </header>
   <p class="sub">Плагіни для Lampa.</p>
+
+  <div class="sortbar" id="sortbar" hidden>
+    <span class="sortbar__label">Сортувати:</span>
+    <button class="chip" data-sort="added">За додаванням</button>
+    <button class="chip" data-sort="newest">Новіші зверху</button>
+    <button class="chip" data-sort="name">А–Я</button>
+  </div>
 
   <main id="list" class="grid"></main>
 
@@ -205,6 +221,43 @@
     list.innerHTML = '<div class="empty"><b>Плагінів поки немає</b></div>';
   }
 
+  // ── Сортування ────────────────────────────────────────────────────────────
+  const SORT_KEY = 'lmpmod_sort';
+  const byName = (a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug), 'uk');
+  const SORTS = {
+    added:  (a, b) => String(a.added || '').localeCompare(String(b.added || '')) || byName(a, b),
+    newest: (a, b) => String(b.updated || '').localeCompare(String(a.updated || '')) || byName(a, b),
+    name:   byName
+  };
+  let allItems = [];
+  let currentSort = 'added';
+  try { currentSort = localStorage.getItem(SORT_KEY) || 'added'; } catch (e) {}
+  if (!SORTS[currentSort]) currentSort = 'added';
+
+  function renderList(){
+    const items = allItems.slice().sort(SORTS[currentSort]);
+    list.innerHTML = '';
+    items.forEach(p => list.appendChild(card(p)));
+    document.querySelectorAll('#sortbar .chip').forEach(function(btn){
+      btn.setAttribute('aria-pressed', String(btn.dataset.sort === currentSort));
+    });
+  }
+
+  function initSort(){
+    const bar = document.getElementById('sortbar');
+    if (!bar) return;
+    if (allItems.length < 2){ bar.hidden = true; renderList(); return; }
+    bar.hidden = false;
+    bar.querySelectorAll('.chip').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        currentSort = btn.dataset.sort;
+        try { localStorage.setItem(SORT_KEY, currentSort); } catch (e) {}
+        renderList();
+      });
+    });
+    renderList();
+  }
+
   if (location.protocol === 'file:'){
     emptyState();
     return;
@@ -218,12 +271,12 @@
     })
     .then(data => {
       const items = Array.isArray(data) ? data : (data.plugins || []);
-      list.innerHTML = '';
-      if (!items.length){
+      allItems = items.filter(p => p && p.slug && !p.hidden);
+      if (!allItems.length){
         emptyState();
         return;
       }
-      items.filter(p => p && p.slug && !p.hidden).forEach(p => list.appendChild(card(p)));
+      initSort();
     })
     .catch(err => {
       list.innerHTML = '<div class="empty err"><b>Не вдалось прочитати plugins.json</b>' + esc(err.message) + '</div>';
