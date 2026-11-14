@@ -112,9 +112,10 @@ def first_added(folder: Path) -> str:
 
 
 def last_updated(folder: Path) -> str:
+    """Час останньої зміни теки плагіна в ISO (для сортування; показ бере дату)."""
     try:
         out = subprocess.run(
-            ["git", "log", "-1", "--format=%cs", "--", str(folder.relative_to(ROOT))],
+            ["git", "log", "-1", "--format=%cI", "--", str(folder.relative_to(ROOT))],
             cwd=ROOT, capture_output=True, text=True, check=True,
         ).stdout.strip()
         if out:
@@ -123,8 +124,8 @@ def last_updated(folder: Path) -> str:
         pass
     newest = max((f.stat().st_mtime for f in folder.rglob("*") if f.is_file()), default=None)
     if newest is None:
-        return dt.date.today().isoformat()
-    return dt.date.fromtimestamp(newest).isoformat()
+        return dt.datetime.now().isoformat(timespec="seconds")
+    return dt.datetime.fromtimestamp(newest).isoformat(timespec="seconds")
 
 
 README_PAGE = """<!DOCTYPE html>
@@ -205,12 +206,14 @@ def collect() -> tuple[list, list]:
             problems.append(f"{slug}: немає {slug}.js")
             continue
         info = parse_readme(folder / "README.md")
+        updated_iso = last_updated(folder)
         entry = {
             "slug": slug,
             "name": info["name"] or slug,
             "description": info["description"],
-            "updated": last_updated(folder),
-            "added": first_added(folder),
+            "updated": updated_iso[:10],       # дата для показу на картці
+            "updated_at": updated_iso,       # точний час для сортування
+            "added": first_added(folder),    # коли плагін додали (порядок за замовчуванням)
         }
         if info.get("version"):
             entry["version"] = info["version"]

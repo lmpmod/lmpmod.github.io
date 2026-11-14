@@ -226,7 +226,8 @@
   const byName = (a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug), 'uk');
   const SORTS = {
     added:  (a, b) => String(a.added || '').localeCompare(String(b.added || '')) || byName(a, b),
-    newest: (a, b) => String(b.updated || '').localeCompare(String(a.updated || '')) || byName(a, b),
+    newest: (a, b) => String(b.updated_at || b.updated || '')
+      .localeCompare(String(a.updated_at || a.updated || '')) || byName(a, b),
     name:   byName
   };
   let allItems = [];
